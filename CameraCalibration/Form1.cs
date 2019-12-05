@@ -1,22 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
+using System.Linq;
 using System.Windows.Forms;
+using Newtonsoft.Json;
 using static System.String;
 
 namespace CameraCalibration
 {
     public partial class Form1 : Form
     {
-        private List<Point> _leftTop;
-        private List<Point> _leftBottom;
-        private List<Point> _rightTop;
-        private List<Point> _rightBottom;
+        private readonly CalibrationConfig _calibrationConfig;
 
         public Form1()
         {
             InitializeComponent();
             Text = @"Camera Calibration";
+            _calibrationConfig = new CalibrationConfig();
         }
 
         private void rightTopChoose_Click(object sender, EventArgs e)
@@ -52,7 +53,8 @@ namespace CameraCalibration
         {
             if (IsNullOrEmpty(fileName))
             {
-                MessageBox.Show(@"You have to choose a file first", @"Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(@"You have to choose a file first", @"Error", MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
             else
             {
@@ -64,7 +66,6 @@ namespace CameraCalibration
         private void rightTopCalib_Click(object sender, EventArgs e)
         {
             DrawCalibratingForm(rightTopName.Text, 2);
-            //ChooseQuadrangle(pictureBox);
         }
 
         private void leftTopCalib_Click(object sender, EventArgs e)
@@ -94,34 +95,78 @@ namespace CameraCalibration
             if (quarter == 1)
             {
                 leftTopPos.Text = displayText;
-                _leftTop = polygon;
+                _calibrationConfig.LeftTop = ChangeOrderForCalibration(polygon);
             }
             else if (quarter == 2)
             {
                 rightTopPos.Text = displayText;
-                _rightTop = polygon;
+                _calibrationConfig.RightTop = ChangeOrderForCalibration(polygon);
             }
             else if (quarter == 3)
             {
                 rightBottomPos.Text = displayText;
-                _rightBottom = polygon;
+                _calibrationConfig.RightBottom = ChangeOrderForCalibration(polygon);
             }
             else if (quarter == 4)
             {
                 leftBottomPos.Text = displayText;
-                _leftBottom = polygon;
+                _calibrationConfig.LeftBottom = ChangeOrderForCalibration(polygon);
             }
 
             BringToFront();
         }
 
+        private static List<Point> ChangeOrderForCalibration(List<Point> polygon)
+        {
+            polygon = polygon.Distinct().ToList();
+            var topPoints = polygon.OrderBy(p => p.Y).Take(2).ToList();
+            var bottomPoints = polygon.OrderByDescending(p => p.Y).Take(2).ToList();
+            var leftPoints = polygon.OrderBy(p => p.X).Take(2).ToList();
+            var rightPoints = polygon.OrderByDescending(p => p.X).Take(2).ToList();
+            //the right order is starting by left-bottom point and going clockwise
+            //it's the way openCV is consuming the values
+            var returnList = new List<Point>();
+            returnList.Add(bottomPoints.Intersect(leftPoints).ToList().First());
+            returnList.Add(topPoints.Intersect(leftPoints).ToList().First());
+            returnList.Add(topPoints.Intersect(rightPoints).ToList().First());
+            returnList.Add(bottomPoints.Intersect(rightPoints).ToList().First());
+
+            return returnList;
+        }
+
         private void generate_Click(object sender, EventArgs e)
         {
-            if (_leftTop == null || _leftBottom == null || _rightTop == null || _rightBottom == null)
+            if (_calibrationConfig.LeftTop.Count < 0 || _calibrationConfig.LeftBottom.Count < 0 ||
+                _calibrationConfig.RightTop.Count < 0 || _calibrationConfig.RightBottom.Count < 0)
             {
                 MessageBox.Show(@"You have to calibrate all images", @"Error", MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+                return;
             }
+            var jsonCalibration = JsonConvert.SerializeObject(_calibrationConfig);
+            using (var saveFile = new SaveFileDialog())
+            {
+                saveFile.Filter = "Json files (*.json)|*.json";
+                saveFile.FilterIndex = 2;
+                saveFile.RestoreDirectory = true;
+                saveFile.FileName = "calibrationConfiguration.json";
+                if (saveFile.ShowDialog() != DialogResult.OK) return;
+                var path = saveFile.FileName;
+                using (var writer = new StreamWriter(path, true))
+                {
+                    writer.WriteLine(jsonCalibration);
+                    writer.Close();
+                }
+            }
+            MessageBox.Show(@"File saved!", @"Result", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+    }
+
+    internal class CalibrationConfig
+    {
+        public List<Point> LeftBottom = new List<Point>();
+        public List<Point> LeftTop = new List<Point>();
+        public List<Point> RightTop = new List<Point>();
+        public List<Point> RightBottom = new List<Point>();
     }
 }
